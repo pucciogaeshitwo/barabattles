@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Simple RPG Battle</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.js"></script>
+  <style>
+    body {
+      margin: 0;
+      background: #222;
+      color: #eee;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    #game-container {
+      margin: auto;
+      width: 600px;
+      height: 400px;
+      background: #444;
+    }
+    button {
+      font-size: 18px;
+      margin: 10px;
+      padding: 10px 20px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Simple RPG Battle</h1>
+<div id="game-container"></div>
+<button id="attack-btn">Attack</button>
+<button id="act-btn">ACT</button>
+<div id="act-menu" style="display:none;">
+  <button class="act-option" data-action="flex">Taunt</button>
+  <button class="act-option" data-action="inspect">Inspect</button>
+  <button class="act-option" data-action="compliment">Compliment</button>
+  <button id="act-cancel">Cancel</button>
+</div>
+<p id="log"></p>
+
+<script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 600,
+    height: 400,
+    parent: 'game-container',
+    scene: {
+      preload,
+      create,
+      update
+    }
+  };
+
+  let player, enemy;
+  let playerHPText, enemyHPText;
+  let logText;
+  let isPlayerTurn = true;
+
+  let messageQueue = [];
+  let waitingForInput = false;
+
+  const game = new Phaser.Game(config);
+
+  function preload() {
+    this.load.image('enemySprite', 'https://i.imgur.com/ZP0kLls.png');
+  }
+
+  function create() {
+    player = { hp: 100, maxHp: 100, attack: 20, healAmount: 15 };
+    enemy = {
+      name: "Il Bara",
+      hp: 100,
+      maxHp: 100,
+      attacks: [
+        { name: "Bara Problemi", damage: 10 },
+        { name: "Vai Bara", damage: 20 },
+        { name: "Flex Outerversale", damage: 15 }
+      ]
+    };
+
+    playerHPText = this.add.text(50, 50, `Player HP: ${player.hp}`, { fontSize: '20px', fill: '#0f0' });
+    enemyHPText = this.add.text(400, 50, `${enemy.name} HP: ${enemy.hp}`, { fontSize: '20px', fill: '#f00' });
+
+    enemy.sprite = this.add.image(500, 200, 'enemySprite').setScale(0.15);
+
+    logText = document.getElementById('log');
+
+    document.getElementById('attack-btn').addEventListener('click', () => {
+      if (!isPlayerTurn || waitingForInput) return;
+      playerAttack();
+    });
+
+    const actBtn = document.getElementById('act-btn');
+    const actMenu = document.getElementById('act-menu');
+    const attackBtn = document.getElementById('attack-btn');
+
+    actBtn.addEventListener('click', () => {
+      if (!isPlayerTurn || waitingForInput) return;
+      attackBtn.style.display = 'none';
+      actBtn.style.display = 'none';
+      actMenu.style.display = 'block';
+    });
+
+    document.getElementById('act-cancel').addEventListener('click', () => {
+      actMenu.style.display = 'none';
+      attackBtn.style.display = 'inline-block';
+      actBtn.style.display = 'inline-block';
+    });
+
+    document.querySelectorAll('.act-option').forEach(button => {
+      button.addEventListener('click', (e) => {
+        const action = e.target.getAttribute('data-action');
+        actMenu.style.display = 'none';
+        handleActAction(action);
+      });
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && waitingForInput) {
+        showNextMessage();
+      }
+    });
+
+    updateStatus();
+  }
+
+  function update() {}
+
+  function playerAttack() {
+    const damage = Phaser.Math.Between(player.attack - 5, player.attack + 5);
+    enemy.hp -= damage;
+
+    game.scene.scenes[0].tweens.add({
+      targets: enemy.sprite,
+      x: enemy.sprite.x + 10,
+      duration: 50,
+      yoyo: true,
+      repeat: 3
+    });
+
+    queueMessage(`You attack ${enemy.name} for ${damage} damage!`);
+    updateStatus();
+    checkBattleEnd();
+
+    if (enemy.hp > 0) {
+      isPlayerTurn = false;
+      setTimeout(enemyTurn, 1000);
+    }
+  }
+
+  function enemyTurn() {
+    if (enemy.skipNextTurn) {
+      queueMessage(`${enemy.name} is confused and skips their turn!`);
+      enemy.skipNextTurn = false;
+      return;
+    }
+
+    const chosenAttack = Phaser.Utils.Array.GetRandom(enemy.attacks);
+    let baseDamage = Phaser.Math.Between(chosenAttack.damage - 3, chosenAttack.damage + 3);
+    const damage = enemy.attackModifier ? Math.floor(baseDamage * enemy.attackModifier) : baseDamage;
+
+    player.hp -= damage;
+    queueMessage(`${enemy.name} uses ${chosenAttack.name} and hits you for ${damage} damage!`);
+
+    if (enemy.attackModifier) {
+      enemy.attackModifier = 1;
+    }
+
+    updateStatus();
+    checkBattleEnd();
+  }
+
+  function updateStatus() {
+    playerHPText.setText(`Player HP: ${Math.max(0, player.hp)}`);
+    enemyHPText.setText(`${enemy.name} HP: ${Math.max(0, enemy.hp)}`);
+  }
+
+  function checkBattleEnd() {
+    if (player.hp <= 0) {
+      queueMessage("You were defeated... Game Over!");
+      disableButtons();
+    } else if (enemy.hp <= 0) {
+      queueMessage(`${enemy.name} is defeated! You win!`);
+      disableButtons();
+    }
+  }
+
+  function disableButtons() {
+    document.getElementById('attack-btn').disabled = true;
+    document.getElementById('act-btn').disabled = true;
+  }
+
+  function handleActAction(action) {
+    switch(action) {
+      case 'flex':
+        queueMessage(`You flex your muscles in front of ${enemy.name}. His muscles visibly deflate.`);
+        enemy.attackModifier = 0.7;
+        break;
+      case 'inspect':
+        queueMessage(`${enemy.name}. You feel like you don't really want to hurt him...`);
+        break;
+      case 'compliment':
+        queueMessage(`You ask ${enemy.name} if he's been lifting. He blushes and looks at the floor.`);
+        enemy.skipNextTurn = true;
+        break;
+    }
+    isPlayerTurn = false;
+    setTimeout(enemyTurn, 1000);
+  }
+
+  function queueMessage(message) {
+    messageQueue.push(message);
+    if (!waitingForInput) {
+      showNextMessage();
+    }
+  }
+
+  function showNextMessage() {
+    if (messageQueue.length > 0) {
+      const next = messageQueue.shift();
+      logText.textContent = next;
+      waitingForInput = true;
+    } else {
+      waitingForInput = false;
+      isPlayerTurn = true;
+      showButtons();
+    }
+  }
+
+  function showButtons() {
+    if (!document.getElementById('attack-btn').disabled) {
+      document.getElementById('attack-btn').style.display = 'inline-block';
+      document.getElementById('act-btn').style.display = 'inline-block';
+    }
+  }
+</script>
+
+</body>
+</html>
+
